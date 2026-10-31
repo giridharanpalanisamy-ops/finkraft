@@ -1,0 +1,17 @@
+server:
+  port: ${PORT:9001}
+
+spring:
+  application:
+    name: mock-asp-a
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true

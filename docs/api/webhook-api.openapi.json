@@ -1,0 +1,93 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "Finkraft Webhook API",
+    "description" : "Status callbacks from ASP B. Called by ASP B only; signed with HMAC-SHA256.",
+    "version" : "v1"
+  },
+  "tags" : [ {
+    "name" : "Webhooks",
+    "description" : "ASP status callbacks"
+  } ],
+  "paths" : {
+    "/webhooks/asp-b" : {
+      "post" : {
+        "tags" : [ "Webhooks" ],
+        "summary" : "ASP B status webhook",
+        "description" : "Verifies the HMAC-SHA256 signature of the raw body (hex, header X-Signature by default),                     publishes one asp.status record per event and waits for Kafka to acknowledge them all                     (5 s). Statuses: QUEUED, ACCEPTED, FAILED, BUYER_RECEIVED, TAX_CONFIRMED.",
+        "operationId" : "receive",
+        "parameters" : [ {
+          "name" : "X-Signature",
+          "in" : "header",
+          "description" : "Hex HMAC-SHA256 of the raw request body with the shared webhook secret",
+          "required" : true
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object"
+              },
+              "example" : {
+                "events" : [ {
+                  "job_id" : "B-1f0c",
+                  "client_reference" : "7b6f6c1e-3a1d-4c55-9f4e-0d9a2b7c1e11",
+                  "status" : "ACCEPTED",
+                  "occurred_at" : "2026-10-31T10:00:00Z"
+                } ]
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Every status acknowledged by Kafka",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "MALFORMED_BODY",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "INVALID_SIGNATURE; nothing published",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          },
+          "503" : {
+            "description" : "Kafka did not acknowledge; ASP B should retry",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object",
+                  "additionalProperties" : { }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : { }
+}

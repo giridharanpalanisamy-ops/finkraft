@@ -1,0 +1,31 @@
+server:
+  port: ${PORT:8084}
+
+spring:
+  application:
+    name: status-mapper
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finkraft}
+    username: ${DB_USER:status_mapper}
+    password: ${DB_PASSWORD:status_mapper}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+
+finkraft:
+  kafka:
+    create-topics: true
+  asp:
+    adapters-enabled: true
+    connect-timeout: 2s
+    read-timeout: 10s
+    permit-wait: 2s
+    a:
+      base-url: ${ASP_A_URL:http://localhost:9001}
+    b:
+      base-url: ${ASP_B_URL:http://localhost:9002}
+      signature-header: X-Signature
+  unmatched:
+    retention: 24h
+    retry-interval: 1m
+  status-mapper:
+    concurrency: 3

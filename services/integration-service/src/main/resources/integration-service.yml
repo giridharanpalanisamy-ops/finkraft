@@ -1,0 +1,42 @@
+server:
+  port: ${PORT:8083}
+
+spring:
+  application:
+    name: integration-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finkraft}
+    username: ${DB_USER:integration}
+    password: ${DB_PASSWORD:integration}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+
+finkraft:
+  kafka:
+    create-topics: true
+  invoice-handler:
+    url: ${INVOICE_HANDLER_URL:http://localhost:8081}
+  asp:
+    adapters-enabled: true
+    connect-timeout: 2s
+    read-timeout: 10s
+    permit-wait: 2s
+    a:
+      base-url: ${ASP_A_URL:http://localhost:9001}
+      api-key: ${ASP_A_STATUS_KEY:dev-finkraft-key}
+      rate-limit-rps: 8          # headroom under ASP A's 10; shared by submits and polls
+      timeout-resends: 1s,2s,4s
+    b:
+      base-url: ${ASP_B_URL:http://localhost:9002}
+      signature-header: X-Signature
+      rate-limit-rps: 0          # ASP B publishes no limit
+  integration:
+    # Kept low enough that waiters on the shared limiter rarely exceed permit-wait.
+    submit-concurrency: 4
+    retry-concurrency: 2
+    poll-concurrency: 2
+    poll-max-age: 30s
+  secrets:
+    values:
+      dev-asp-a: ${ASP_A_SELLER_KEY:dev-asp-a-key}
+      dev-asp-b: ${ASP_B_SELLER_KEY:dev-asp-b-key}

@@ -1,0 +1,25 @@
+server:
+  port: ${PORT:8086}
+
+spring:
+  application:
+    name: scheduler-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finkraft}
+    username: ${DB_USER:scheduler}
+    password: ${DB_PASSWORD:scheduler}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+
+finkraft:
+  kafka:
+    create-topics: true
+  scheduler:
+    interval: 5s
+    batch-size: 500
+    # Poll dispatch budget, below ASP A's limiter (8 rps) so submits keep headroom.
+    max-polls-per-second: 5
+  sla:
+    asp-b:
+      accepted: 30m
+      reported: 24h

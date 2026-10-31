@@ -1,0 +1,137 @@
+# Local runtime: Postgres, Kafka (KRaft), every service and both mock ASPs.
+# Build the jars first: ./gradlew bootJar   then: docker compose up --build
+
+x-service: &service
+  build: &build
+    context: .
+    dockerfile: docker/service.Dockerfile
+  restart: on-failure
+  healthcheck:
+    test: ["CMD-SHELL", "curl -fs http://localhost:$${PORT}/actuator/health/readiness || exit 1"]
+    interval: 5s
+    timeout: 3s
+    retries: 30
+    start_period: 20s
+
+x-env: &env
+  DB_URL: jdbc:postgresql://postgres:5432/finkraft
+  KAFKA_BOOTSTRAP: kafka:9092
+  INVOICE_HANDLER_URL: http://invoice-handler:8081
+  ASP_A_URL: http://mock-asp-a:9001
+  ASP_B_URL: http://mock-asp-b:9002
+
+# Local demo only: poll ASP A every 2-10 s instead of 30 s-15 min, and keep each mock status
+# visible for 20 s so polls see every step (see docs/ASSUMPTIONS.md, open question A9).
+x-demo-timings: &demo-timings
+  FINKRAFT_POLL_SCHEDULE_FIRST: 2s
+  FINKRAFT_POLL_SCHEDULE_MAX: 10s
+  FINKRAFT_SCHEDULER_INTERVAL: 1s
+
+x-after-schema: &after-schema
+  postgres: { condition: service_healthy }
+  kafka: { condition: service_healthy }
+  invoice-handler: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: finkraft
+      POSTGRES_USER: finkraft
+      POSTGRES_PASSWORD: finkraft
+    ports: ["${POSTGRES_HOST_PORT:-15432}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finkraft -d finkraft"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  kafka:
+    image: apache/kafka:3.9.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 12
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports: ["29092:29092"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  invoice-handler:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/invoice-handler/build/libs/app.jar } }
+    environment: { <<: [*env, *demo-timings], PORT: 8081 }
+    ports: ["${HANDLER_HOST_PORT:-18081}:8081"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+
+  management-service:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/management-service/build/libs/app.jar } }
+    environment: { <<: *env, PORT: 8080 }
+    ports: ["${MANAGEMENT_HOST_PORT:-18080}:8080"]
+    depends_on: *after-schema
+
+  validator-service:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/validator-service/build/libs/app.jar } }
+    environment: { <<: *env, PORT: 8082 }
+    depends_on: *after-schema
+
+  integration-service:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/integration-service/build/libs/app.jar } }
+    environment: { <<: *env, PORT: 8083 }
+    depends_on: *after-schema
+
+  status-mapper:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/status-mapper/build/libs/app.jar } }
+    environment: { <<: *env, PORT: 8084 }
+    depends_on: *after-schema
+
+  webhook-handler:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/webhook-handler/build/libs/app.jar } }
+    environment: { <<: *env, PORT: 8085 }
+    ports: ["${WEBHOOK_HOST_PORT:-18085}:8085"]
+    depends_on:
+      kafka: { condition: service_healthy }
+
+  scheduler-service:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/scheduler-service/build/libs/app.jar } }
+    environment: { <<: [*env, *demo-timings], PORT: 8086 }
+    depends_on: *after-schema
+
+  validation-agent:
+    <<: *service
+    build: { <<: *build, args: { JAR: services/validation-agent/build/libs/app.jar } }
+    environment: { <<: *env, PORT: 8087, AGENT_ENABLED: "false" }
+    depends_on: *after-schema
+
+  mock-asp-a:
+    <<: *service
+    build: { <<: *build, args: { JAR: test-support/mock-asp-a/build/libs/app.jar } }
+    environment: { PORT: 9001, MOCK_STEP_DELAY: 20s }
+    ports: ["${MOCK_A_HOST_PORT:-19001}:9001"]
+
+  mock-asp-b:
+    <<: *service
+    build: { <<: *build, args: { JAR: test-support/mock-asp-b/build/libs/app.jar } }
+    environment: { PORT: 9002, WEBHOOK_URL: http://webhook-handler:8085/webhooks/asp-b }
+    ports: ["${MOCK_B_HOST_PORT:-19002}:9002"]

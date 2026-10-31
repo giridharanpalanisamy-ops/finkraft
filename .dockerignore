@@ -1,0 +1,4 @@
+**
+!services/*/build/libs/app.jar
+!test-support/*/build/libs/app.jar
+!docker/

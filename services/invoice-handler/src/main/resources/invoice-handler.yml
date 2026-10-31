@@ -1,0 +1,50 @@
+server:
+  port: ${PORT:8081}
+
+spring:
+  application:
+    name: invoice-handler
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finkraft}
+    username: ${DB_USER:invoice_handler}
+    password: ${DB_PASSWORD:invoice_handler}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+  flyway:
+    enabled: true
+    user: ${DB_OWNER_USER:finkraft}
+    password: ${DB_OWNER_PASSWORD:finkraft}
+    # Dev defaults; every deployed environment overrides these from its secret store.
+    placeholders:
+      invoice_handler_password: ${DB_PASSWORD_INVOICE_HANDLER:invoice_handler}
+      management_password: ${DB_PASSWORD_MANAGEMENT:management}
+      validator_password: ${DB_PASSWORD_VALIDATOR:validator}
+      integration_password: ${DB_PASSWORD_INTEGRATION:integration}
+      status_mapper_password: ${DB_PASSWORD_STATUS_MAPPER:status_mapper}
+      webhook_handler_password: ${DB_PASSWORD_WEBHOOK_HANDLER:webhook_handler}
+      scheduler_password: ${DB_PASSWORD_SCHEDULER:scheduler}
+      validation_agent_password: ${DB_PASSWORD_VALIDATION_AGENT:validation_agent}
+
+finkraft:
+  kafka:
+    create-topics: true
+  submit:
+    max-attempts: 6
+    backoff:
+      base: 30s
+      factor: 2
+      max: 30m
+      jitter: 0.2
+    lease: 2m
+  reconcile:
+    window: 30m
+  poll:
+    schedule:
+      first: 30s
+      max: 15m
+  outbox:
+    interval: 500ms
+    batch-size: 100
+  handler:
+    version-conflict-retries: 3
+    concurrency: 3

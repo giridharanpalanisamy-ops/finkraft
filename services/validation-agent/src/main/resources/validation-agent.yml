@@ -1,0 +1,19 @@
+server:
+  port: ${PORT:8087}
+
+spring:
+  application:
+    name: validation-agent
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finkraft}
+    username: ${DB_USER:validation_agent}
+    password: ${DB_PASSWORD:validation_agent}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+
+agent:
+  enabled: ${AGENT_ENABLED:false}
+
+finkraft:
+  kafka:
+    create-topics: true

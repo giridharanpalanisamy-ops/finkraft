@@ -1,0 +1,36 @@
+server:
+  port: ${PORT:8085}
+
+spring:
+  application:
+    name: webhook-handler
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+    producer:
+      properties:
+        # Fail fast enough to answer within the ack timeout when Kafka is down.
+        max.block.ms: 5000
+        request.timeout.ms: 4000
+        delivery.timeout.ms: 5000
+
+finkraft:
+  kafka:
+    create-topics: true
+  webhook:
+    kafka-ack-timeout: 5s
+  asp:
+    adapters-enabled: true
+    connect-timeout: 2s
+    read-timeout: 10s
+    permit-wait: 2s
+    a:
+      base-url: ${ASP_A_URL:http://localhost:9001}
+    b:
+      base-url: ${ASP_B_URL:http://localhost:9002}
+      webhook-secret: ${ASP_B_WEBHOOK_SECRET:dev-webhook-secret}
+      signature-header: ${ASP_B_SIGNATURE_HEADER:X-Signature}

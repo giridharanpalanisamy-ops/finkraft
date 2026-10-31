@@ -1,0 +1,900 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "Finkraft Public API",
+    "description" : "Upload UAE e-invoices, follow them through validation and ASP submission, and correct invoices that fail. Every invoice endpoint is scoped to the tenant that owns the API key.\n\nInvoice states: RECEIVED, VALIDATING, VALIDATION_FAILED, READY_TO_SUBMIT, SUBMITTING, SUBMISSION_PENDING, SUBMISSION_UNKNOWN, ACCEPTED_BY_ASP, REJECTED, DELIVERED, REPORTED, COMPLETED, NEEDS_REVIEW.",
+    "version" : "v1"
+  },
+  "tags" : [ {
+    "name" : "Invoices",
+    "description" : "Upload, read and correct invoices (X-Api-Key)"
+  }, {
+    "name" : "Admin",
+    "description" : "Tenants, sellers and ASP routing (X-Admin-Key)"
+  } ],
+  "paths" : {
+    "/api/v1/invoices" : {
+      "get" : {
+        "tags" : [ "Invoices" ],
+        "summary" : "List invoices",
+        "description" : "Newest first, optionally filtered by state.",
+        "operationId" : "list",
+        "parameters" : [ {
+          "name" : "state",
+          "in" : "query",
+          "description" : "Only invoices in this state, e.g. NEEDS_REVIEW",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "1 to 1000",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 100
+          }
+        } ],
+        "responses" : {
+          "401" : {
+            "description" : "Missing or unknown X-Api-Key"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ]
+      },
+      "post" : {
+        "tags" : [ "Invoices" ],
+        "summary" : "Upload one invoice",
+        "description" : "Parses and canonicalises the invoice, resolves the seller by sellerTrn within your tenant, and                     applies the duplicate rule: same number and same content is an idempotent replay (200); same                     number with different content is rejected (409) unless the existing invoice failed validation                     or was rejected, in which case it becomes a new revision (201); a new number with known content                     is created with a POSSIBLE_DUPLICATE warning (201). A new invoice starts validating at once.",
+        "operationId" : "upload",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CanonicalInvoice"
+              },
+              "example" : {
+                "sellerTrn" : "100000000000003",
+                "buyerTrn" : "100000000000011",
+                "invoiceNumber" : "INV-2026-0001",
+                "issueDate" : "2026-10-01",
+                "currency" : "AED",
+                "lines" : [ {
+                  "description" : "Consulting",
+                  "quantity" : 2,
+                  "unitPrice" : 5E+1,
+                  "vatCategory" : "S",
+                  "vatRate" : 5,
+                  "lineNet" : 1E+2,
+                  "lineVat" : 5
+                } ],
+                "totals" : {
+                  "netTotal" : 1E+2,
+                  "vatTotal" : 5,
+                  "grossTotal" : 105
+                }
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created (outcome CREATED) or new revision (outcome REVISION)",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UploadResult"
+                }
+              }
+            }
+          },
+          "200" : {
+            "description" : "Idempotent replay of an existing invoice (outcome REPLAY)",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UploadResult"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "DUPLICATE_INVOICE_NUMBER: same number, different content",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UploadResult"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "PARSE_ERROR or UNKNOWN_SELLER",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/UploadResult"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Missing or unknown X-Api-Key"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/invoices/{id}/revisions" : {
+      "post" : {
+        "tags" : [ "Invoices" ],
+        "summary" : "Upload a corrected revision",
+        "description" : "Allowed only while the invoice is VALIDATION_FAILED or REJECTED. The revision keeps the invoice                     number, goes back to RECEIVED and is validated again; other pending suggestions are dismissed.",
+        "operationId" : "revise",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RevisionBody"
+              },
+              "examples" : {
+                "Corrected invoice" : {
+                  "description" : "Corrected invoice",
+                  "value" : {
+                    "invoice" : {
+                      "sellerTrn" : "100000000000003",
+                      "buyerTrn" : "100000000000011",
+                      "invoiceNumber" : "INV-2026-0001",
+                      "issueDate" : "2026-10-01",
+                      "currency" : "AED",
+                      "lines" : [ {
+                        "description" : "Consulting",
+                        "quantity" : 2,
+                        "unitPrice" : 5E+1,
+                        "vatCategory" : "S",
+                        "vatRate" : 5,
+                        "lineNet" : 1E+2,
+                        "lineVat" : 5
+                      } ],
+                      "totals" : {
+                        "netTotal" : 1E+2,
+                        "vatTotal" : 5,
+                        "grossTotal" : 105
+                      }
+                    }
+                  }
+                },
+                "Approve a suggestion" : {
+                  "description" : "Approve a suggestion",
+                  "value" : {
+                    "suggestionId" : "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  }
+                }
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Revision accepted; validation restarted",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "No such invoice for this tenant"
+          },
+          "409" : {
+            "description" : "INVALID_STATE: the invoice is not VALIDATION_FAILED or REJECTED",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "PARSE_ERROR or INVALID_REQUEST (different invoice number, unknown suggestion)",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Missing or unknown X-Api-Key"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/invoices/bulk" : {
+      "post" : {
+        "tags" : [ "Invoices" ],
+        "summary" : "Bulk upload (JSON array)",
+        "description" : "Up to finkraft.bulk.max-rows (1,000) invoices. Each row is processed independently, exactly as a single upload.",
+        "operationId" : "bulkCsv",
+        "requestBody" : {
+          "content" : {
+            "text/csv" : {
+              "schema" : {
+                "type" : "string"
+              },
+              "example" : "sellerTrn,buyerTrn,invoiceNumber,issueDate,currency,description,quantity,unitPrice,vatCategory,vatRate,lineNet,lineVat,netTotal,vatTotal,grossTotal\n100000000000003,100000000000011,INV-2026-0002,2026-10-01,AED,Consulting,2,50.00,S,5.00,100.00,5.00,100.00,5.00,105.00"
+            },
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/JsonNode"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "A result per row",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BulkResult"
+                }
+              }
+            }
+          },
+          "413" : {
+            "description" : "TOO_MANY_ROWS",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "Body is not a JSON array",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Missing or unknown X-Api-Key"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/admin/tenants" : {
+      "get" : {
+        "tags" : [ "Admin" ],
+        "summary" : "List tenants",
+        "operationId" : "tenants",
+        "responses" : {
+          "401" : {
+            "description" : "Missing or wrong X-Admin-Key"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ]
+      },
+      "post" : {
+        "tags" : [ "Admin" ],
+        "summary" : "Create a tenant",
+        "description" : "Returns the tenant's API key once.",
+        "operationId" : "createTenant",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/NewTenant"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreatedTenant"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Missing or wrong X-Admin-Key"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/admin/sellers" : {
+      "get" : {
+        "tags" : [ "Admin" ],
+        "summary" : "List a tenant's sellers",
+        "operationId" : "sellers",
+        "parameters" : [ {
+          "name" : "tenantId",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "401" : {
+            "description" : "Missing or wrong X-Admin-Key"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ]
+      },
+      "post" : {
+        "tags" : [ "Admin" ],
+        "summary" : "Create a seller",
+        "description" : "A seller is a legal entity with a 15-digit UAE TRN; one tenant can have several.",
+        "operationId" : "createSeller",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/NewSeller"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Seller"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Missing or wrong X-Admin-Key"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/admin/asp-configs" : {
+      "get" : {
+        "tags" : [ "Admin" ],
+        "summary" : "List a seller's routing rows",
+        "operationId" : "aspConfigs",
+        "parameters" : [ {
+          "name" : "sellerId",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "401" : {
+            "description" : "Missing or wrong X-Admin-Key"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ]
+      },
+      "post" : {
+        "tags" : [ "Admin" ],
+        "summary" : "Route a seller to an ASP",
+        "description" : "Adds a routing row and, with secretRef, the seller's credential reference. The newest enabled                     row already in effect is the active route. It is pinned to an invoice when the invoice becomes                     READY_TO_SUBMIT, so a routing change only affects invoices not yet READY_TO_SUBMIT.",
+        "operationId" : "createAspConfig",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/NewAspConfig"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "UNKNOWN_ASP",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "object"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Missing or wrong X-Admin-Key"
+          }
+        },
+        "security" : [ {
+          "adminKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/invoices/{id}" : {
+      "get" : {
+        "tags" : [ "Invoices" ],
+        "summary" : "Get one invoice",
+        "description" : "The current state and the canonical invoice of the latest revision.",
+        "operationId" : "get",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "The invoice",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/InvoiceView"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "No such invoice for this tenant"
+          },
+          "401" : {
+            "description" : "Missing or unknown X-Api-Key"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/invoices/{id}/fix-suggestions" : {
+      "get" : {
+        "tags" : [ "Invoices" ],
+        "summary" : "Pending fix suggestions",
+        "description" : "Suggestions from the validation agent (phase 8) waiting for the customer. Suggestions never change an invoice by themselves.",
+        "operationId" : "fixSuggestions",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "Pending suggestions",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/FixSuggestionView"
+                  }
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "No such invoice for this tenant"
+          },
+          "401" : {
+            "description" : "Missing or unknown X-Api-Key"
+          }
+        },
+        "security" : [ {
+          "apiKey" : [ ]
+        } ]
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CanonicalInvoice" : {
+        "type" : "object",
+        "properties" : {
+          "sellerTrn" : {
+            "type" : "string"
+          },
+          "buyerTrn" : {
+            "type" : "string"
+          },
+          "invoiceNumber" : {
+            "type" : "string"
+          },
+          "issueDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "lines" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/InvoiceLine"
+            }
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/InvoiceTotals"
+          }
+        }
+      },
+      "InvoiceLine" : {
+        "type" : "object",
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "quantity" : {
+            "type" : "number"
+          },
+          "unitPrice" : {
+            "type" : "number"
+          },
+          "vatCategory" : {
+            "type" : "string"
+          },
+          "vatRate" : {
+            "type" : "number"
+          },
+          "lineNet" : {
+            "type" : "number"
+          },
+          "lineVat" : {
+            "type" : "number"
+          }
+        }
+      },
+      "InvoiceTotals" : {
+        "type" : "object",
+        "properties" : {
+          "netTotal" : {
+            "type" : "number"
+          },
+          "vatTotal" : {
+            "type" : "number"
+          },
+          "grossTotal" : {
+            "type" : "number"
+          }
+        }
+      },
+      "JsonNode" : { },
+      "UploadResult" : {
+        "type" : "object",
+        "description" : "Result of an upload. On errors only outcome (the error code) and message are set.",
+        "properties" : {
+          "invoiceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "revision" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "possibleDuplicateOf" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "warning" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "RevisionBody" : {
+        "type" : "object",
+        "description" : "Either a corrected invoice or the id of a fix suggestion to approve",
+        "properties" : {
+          "invoice" : {
+            "$ref" : "#/components/schemas/CanonicalInvoice",
+            "description" : "Corrected canonical invoice (same invoice number)"
+          },
+          "suggestionId" : {
+            "type" : "string",
+            "format" : "uuid",
+            "description" : "Pending fix suggestion to approve instead of sending an invoice"
+          }
+        }
+      },
+      "BulkResult" : {
+        "type" : "object",
+        "properties" : {
+          "rows" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "results" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/BulkRowResult"
+            }
+          }
+        }
+      },
+      "BulkRowResult" : {
+        "type" : "object",
+        "description" : "Result for one row: created, replay, revision, duplicate_rejected, parse_error or error",
+        "properties" : {
+          "row" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "invoiceNumber" : {
+            "type" : "string"
+          },
+          "result" : {
+            "type" : "string"
+          },
+          "invoiceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "message" : {
+            "type" : "string"
+          }
+        }
+      },
+      "NewTenant" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "name" ]
+      },
+      "CreatedTenant" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "apiKey" : {
+            "type" : "string",
+            "description" : "The tenant's API key. Shown only here; Finkraft stores its SHA-256 hash."
+          }
+        }
+      },
+      "NewSeller" : {
+        "type" : "object",
+        "properties" : {
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "trn" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "\\d{15}"
+          },
+          "name" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "name", "tenantId", "trn" ]
+      },
+      "Seller" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "trn" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "NewAspConfig" : {
+        "type" : "object",
+        "properties" : {
+          "sellerId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "aspId" : {
+            "type" : "string",
+            "description" : "asp-a or asp-b",
+            "example" : "asp-b",
+            "minLength" : 1
+          },
+          "effectiveFrom" : {
+            "type" : "string",
+            "format" : "date-time",
+            "description" : "When the route takes effect; defaults to now"
+          },
+          "enabled" : {
+            "type" : "boolean",
+            "description" : "Defaults to true"
+          },
+          "secretRef" : {
+            "type" : "string",
+            "description" : "Name of the seller's ASP credential in the secret store, never the secret itself",
+            "example" : "dev-asp-b"
+          }
+        },
+        "required" : [ "aspId", "sellerId" ]
+      },
+      "InvoiceView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "invoiceNumber" : {
+            "type" : "string"
+          },
+          "sellerId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "revision" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "aspId" : {
+            "type" : "string"
+          },
+          "aspRef" : {
+            "type" : "string"
+          },
+          "attemptCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "possibleDuplicateOf" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "deliveredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "reportedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "invoice" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          }
+        }
+      },
+      "FixSuggestionView" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "revision" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "suggestion" : {
+            "$ref" : "#/components/schemas/JsonNode"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      }
+    },
+    "securitySchemes" : {
+      "apiKey" : {
+        "type" : "apiKey",
+        "description" : "Tenant API key, shown once when the tenant is created",
+        "name" : "X-Api-Key",
+        "in" : "header"
+      },
+      "adminKey" : {
+        "type" : "apiKey",
+        "description" : "Operator key for the admin endpoints (ADMIN_API_KEY)",
+        "name" : "X-Admin-Key",
+        "in" : "header"
+      }
+    }
+  }
+}

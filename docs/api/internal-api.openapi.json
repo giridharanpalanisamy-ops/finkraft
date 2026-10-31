@@ -1,0 +1,383 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "Finkraft InvoiceHandler Internal API",
+    "description" : "The only synchronous calls into the single writer of invoice data. Called only by management-service (create, revise) and integration-service (claim); never exposed publicly. Everything else reaches the InvoiceHandler through Kafka (invoice.events, fix.suggested).",
+    "version" : "v1"
+  },
+  "tags" : [ {
+    "name" : "Internal",
+    "description" : "Create, revise and claim invoices"
+  } ],
+  "paths" : {
+    "/internal/invoices" : {
+      "post" : {
+        "tags" : [ "Internal" ],
+        "summary" : "Create an invoice (management-service)",
+        "description" : "Applies the duplicate rule. A new invoice is inserted with its first revision as RECEIVED,                     VALIDATION_STARTED is applied, and the outbox row for validation.requested and the audit rows                     are written, all in one transaction.",
+        "operationId" : "create",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateInvoiceRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "CREATED, or REVISION of a failed or rejected invoice",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreateInvoiceResponse"
+                }
+              }
+            }
+          },
+          "200" : {
+            "description" : "REPLAY: same number and content as an existing invoice",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreateInvoiceResponse"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "DUPLICATE_INVOICE_NUMBER",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreateInvoiceResponse"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "tenantId, sellerId or invoiceNumber missing",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/invoices/{id}/revisions" : {
+      "post" : {
+        "tags" : [ "Internal" ],
+        "summary" : "Upload a revision (management-service)",
+        "description" : "Only from VALIDATION_FAILED or REJECTED. Applies REVISION_UPLOADED then VALIDATION_STARTED.",
+        "operationId" : "revise",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/RevisionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Revision stored; validation restarted",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CreateInvoiceResponse"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "NOT_FOUND",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "INVALID_STATE",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "INVALID_REQUEST",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/invoices/{id}/claim" : {
+      "post" : {
+        "tags" : [ "Internal" ],
+        "summary" : "Claim an invoice for submission (integration-service)",
+        "description" : "Compare-and-set: UPDATE invoices SET state='SUBMITTING', version=version+1,                     attempt_count=attempt_count+1, lease_expires_at=now()+lease WHERE id=? AND                     state='READY_TO_SUBMIT' AND version=?. Exactly one caller wins for a given version (R2).",
+        "operationId" : "claim",
+        "parameters" : [ {
+          "name" : "id",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ClaimRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Claimed; the invoice as claimed",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ClaimedInvoice"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "NOT_CLAIMED: another worker or an earlier delivery has it",
+            "content" : {
+              "*/*" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "CanonicalInvoice" : {
+        "type" : "object",
+        "properties" : {
+          "sellerTrn" : {
+            "type" : "string"
+          },
+          "buyerTrn" : {
+            "type" : "string"
+          },
+          "invoiceNumber" : {
+            "type" : "string"
+          },
+          "issueDate" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "lines" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/InvoiceLine"
+            }
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/InvoiceTotals"
+          }
+        }
+      },
+      "CreateInvoiceRequest" : {
+        "type" : "object",
+        "properties" : {
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sellerId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "invoice" : {
+            "$ref" : "#/components/schemas/CanonicalInvoice"
+          }
+        }
+      },
+      "InvoiceLine" : {
+        "type" : "object",
+        "properties" : {
+          "description" : {
+            "type" : "string"
+          },
+          "quantity" : {
+            "type" : "number"
+          },
+          "unitPrice" : {
+            "type" : "number"
+          },
+          "vatCategory" : {
+            "type" : "string"
+          },
+          "vatRate" : {
+            "type" : "number"
+          },
+          "lineNet" : {
+            "type" : "number"
+          },
+          "lineVat" : {
+            "type" : "number"
+          }
+        }
+      },
+      "InvoiceTotals" : {
+        "type" : "object",
+        "properties" : {
+          "netTotal" : {
+            "type" : "number"
+          },
+          "vatTotal" : {
+            "type" : "number"
+          },
+          "grossTotal" : {
+            "type" : "number"
+          }
+        }
+      },
+      "CreateInvoiceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "invoiceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "revision" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "state" : {
+            "type" : "string"
+          },
+          "outcome" : {
+            "type" : "string"
+          },
+          "possibleDuplicateOf" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "ErrorResponse" : {
+        "type" : "object",
+        "properties" : {
+          "error" : {
+            "type" : "string"
+          },
+          "message" : {
+            "type" : "string"
+          },
+          "invoiceId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "RevisionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "invoice" : {
+            "$ref" : "#/components/schemas/CanonicalInvoice"
+          },
+          "suggestionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "ClaimRequest" : {
+        "type" : "object",
+        "properties" : {
+          "expectedVersion" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "workerId" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ClaimedInvoice" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "tenantId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "sellerId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "invoice" : {
+            "$ref" : "#/components/schemas/CanonicalInvoice"
+          },
+          "aspId" : {
+            "type" : "string"
+          },
+          "clientRef" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "attemptCount" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "version" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "leaseExpiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      }
+    }
+  }
+}

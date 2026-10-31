@@ -1,0 +1,18 @@
+server:
+  port: ${PORT:8082}
+
+spring:
+  application:
+    name: validator-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finkraft}
+    username: ${DB_USER:validator}
+    password: ${DB_PASSWORD:validator}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
+
+finkraft:
+  kafka:
+    create-topics: true
+  validator:
+    concurrency: 3
